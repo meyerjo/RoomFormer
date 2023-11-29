@@ -413,8 +413,8 @@ def evaluate_floor_custom(model, dataset_name, data_loader, device, output_dir, 
         # process per scene
         for i in range(pred_logits.shape[0]):
 
-            if int(scene_ids[i]) in wrong_s3d_annotations_list:
-                continue
+            # if int(scene_ids[i]) in wrong_s3d_annotations_list:
+            #     continue
             # curr_opts = copy.deepcopy(opts)
             # curr_opts.scene_id = "scene_0" + str(scene_ids[i])
             # curr_data_rw = S3DRW(curr_opts, mode="test")
