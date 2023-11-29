@@ -16,6 +16,31 @@ from copy import deepcopy
 
 from detectron2.data.detection_utils import annotations_to_instances, transform_instance_annotations
 from detectron2.structures import BoxMode
+from pathlib import Path
+
+class CustomPoly(Dataset):
+    def __init__(self, img_folder, ann_file, transforms, semantic_classes):
+        self.root = img_folder
+        self.ids = list(sorted(Path(self.root).rglob("*.png")))
+
+    def __len__(self):
+        return len(self.ids)
+
+    def __getitem__(self, index):
+        file_name = self.ids[index]
+        img = np.array(Image.open(file_name))
+        w, h = img.shape
+
+        record = {}
+        record["file_name"] = file_name
+        record["height"] = h
+        record["width"] = w
+        record['image_id'] = file_name.name
+        record['annotations'] = []
+        record['image'] = (1 / 255) * torch.as_tensor(np.ascontiguousarray(np.expand_dims(img, 0)))
+        record['instances'] = []
+        return record
+
 
 
 class MultiPoly(Dataset):
@@ -135,4 +160,12 @@ def build(image_set, args):
     
     dataset = MultiPoly(img_folder, ann_file, transforms=make_poly_transforms(image_set), semantic_classes=args.semantic_classes)
     
+    return dataset
+
+def build_custom(args):
+    root = Path(args.dataset_root)
+    assert root.exists(), f'provided data path {root} does not exist'
+
+    dataset = CustomPoly(root, None, transforms=make_poly_transforms("val"), semantic_classes=args.semantic_classes)
+
     return dataset

@@ -382,3 +382,131 @@ def evaluate_floor(model, dataset_name, data_loader, device, output_dir, plot_pr
 
     with open(os.path.join(output_dir, 'results.txt'), 'w') as file:
         file.write(json.dumps(quant_result_dict))
+
+
+@torch.no_grad()
+def evaluate_floor_custom(model, dataset_name, data_loader, device, output_dir, plot_pred=True, plot_density=True,
+                   plot_gt=True, semantic_rich=False):
+    model.eval()
+
+    quant_result_dict = None
+    scene_counter = 0
+
+    if not os.path.exists(output_dir):
+        os.mkdir(output_dir)
+
+    for batched_inputs in data_loader:
+
+        samples = [x["image"].to(device) for x in batched_inputs]
+        scene_ids = [x["image_id"] for x in batched_inputs]
+        gt_instances = []
+
+        outputs = model(samples)
+        pred_logits = outputs['pred_logits']
+        pred_corners = outputs['pred_coords']
+        fg_mask = torch.sigmoid(pred_logits) > 0.5  # select valid corners
+
+        if 'pred_room_logits' in outputs:
+            prob = torch.nn.functional.softmax(outputs['pred_room_logits'], -1)
+            _, pred_room_label = prob[..., :-1].max(-1)
+
+        # process per scene
+        for i in range(pred_logits.shape[0]):
+
+            if int(scene_ids[i]) in wrong_s3d_annotations_list:
+                continue
+            curr_opts = copy.deepcopy(opts)
+            curr_opts.scene_id = "scene_0" + str(scene_ids[i])
+            curr_data_rw = S3DRW(curr_opts, mode="test")
+            evaluator = Evaluator(curr_data_rw, curr_opts)
+
+            print("Running Evaluation for scene %s" % scene_ids[i])
+
+            fg_mask_per_scene = fg_mask[i]
+            pred_corners_per_scene = pred_corners[i]
+            room_polys = []
+
+            if semantic_rich:
+                room_types = []
+                window_doors = []
+                window_doors_types = []
+                pred_room_label_per_scene = pred_room_label[i].cpu().numpy()
+
+            # process per room
+            for j in range(fg_mask_per_scene.shape[0]):
+                fg_mask_per_room = fg_mask_per_scene[j]
+                pred_corners_per_room = pred_corners_per_scene[j]
+                valid_corners_per_room = pred_corners_per_room[fg_mask_per_room]
+                if len(valid_corners_per_room) > 0:
+                    corners = (valid_corners_per_room * 255).cpu().numpy()
+                    corners = np.around(corners).astype(np.int32)
+
+                    if not semantic_rich:
+                        # only regular rooms
+                        if len(corners) >= 4 and Polygon(corners).area >= 100:
+                            room_polys.append(corners)
+                    else:
+                        # regular rooms
+                        if pred_room_label_per_scene[j] not in [16, 17]:
+                            if len(corners) >= 4 and Polygon(corners).area >= 100:
+                                room_polys.append(corners)
+                                room_types.append(pred_room_label_per_scene[j])
+                        # window / door
+                        elif len(corners) == 2:
+                            window_doors.append(corners)
+                            window_doors_types.append(pred_room_label_per_scene[j])
+
+            if not semantic_rich:
+                quant_result_dict_scene = evaluator.evaluate_scene(room_polys=room_polys)
+            else:
+                quant_result_dict_scene = evaluator.evaluate_scene(
+                    room_polys=room_polys,
+                    room_types=room_types,
+                    window_door_lines=window_doors,
+                    window_door_lines_types=window_doors_types)
+
+            if quant_result_dict is None:
+                quant_result_dict = quant_result_dict_scene
+            else:
+                for k in quant_result_dict.keys():
+                    quant_result_dict[k] += quant_result_dict_scene[k]
+
+            scene_counter += 1
+
+            if plot_pred:
+                if semantic_rich:
+                    # plot predicted semantic rich floorplan
+                    pred_sem_rich = []
+                    for j in range(len(room_polys)):
+                        temp_poly = room_polys[j]
+                        temp_poly_flip_y = temp_poly.copy()
+                        temp_poly_flip_y[:, 1] = 255 - temp_poly_flip_y[:, 1]
+                        pred_sem_rich.append([temp_poly_flip_y, room_types[j]])
+                    for j in range(len(window_doors)):
+                        temp_line = window_doors[j]
+                        temp_line_flip_y = temp_line.copy()
+                        temp_line_flip_y[:, 1] = 255 - temp_line_flip_y[:, 1]
+                        pred_sem_rich.append([temp_line_flip_y, window_doors_types[j]])
+
+                    pred_sem_rich_path = os.path.join(output_dir, '{}_sem_rich_pred.png'.format(scene_ids[i]))
+                    plot_semantic_rich_floorplan(pred_sem_rich, pred_sem_rich_path,
+                                                 prec=quant_result_dict_scene['room_prec'],
+                                                 rec=quant_result_dict_scene['room_rec'])
+                else:
+                    # plot regular room floorplan
+                    room_polys = [np.array(r) for r in room_polys]
+                    floorplan_map = plot_floorplan_with_regions(room_polys, scale=1000)
+                    cv2.imwrite(os.path.join(output_dir, '{}_pred_floorplan.png'.format(scene_ids[i])), floorplan_map)
+
+            if plot_density:
+                density_map = np.transpose((samples[i] * 255).cpu().numpy(), [1, 2, 0])
+                density_map = np.repeat(density_map, 3, axis=2)
+                pred_room_map = np.zeros([256, 256, 3])
+
+                for room_poly in room_polys:
+                    pred_room_map = plot_room_map(room_poly, pred_room_map)
+
+                # plot predicted polygon overlaid on the density map
+                pred_room_map = np.clip(pred_room_map + density_map, 0, 255)
+                cv2.imwrite(os.path.join(output_dir, '{}_pred_room_map.png'.format(scene_ids[i])), pred_room_map)
+
