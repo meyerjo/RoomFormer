@@ -415,10 +415,10 @@ def evaluate_floor_custom(model, dataset_name, data_loader, device, output_dir, 
 
             if int(scene_ids[i]) in wrong_s3d_annotations_list:
                 continue
-            curr_opts = copy.deepcopy(opts)
-            curr_opts.scene_id = "scene_0" + str(scene_ids[i])
-            curr_data_rw = S3DRW(curr_opts, mode="test")
-            evaluator = Evaluator(curr_data_rw, curr_opts)
+            # curr_opts = copy.deepcopy(opts)
+            # curr_opts.scene_id = "scene_0" + str(scene_ids[i])
+            # curr_data_rw = S3DRW(curr_opts, mode="test")
+            # evaluator = Evaluator(curr_data_rw, curr_opts)
 
             print("Running Evaluation for scene %s" % scene_ids[i])
 
@@ -456,20 +456,20 @@ def evaluate_floor_custom(model, dataset_name, data_loader, device, output_dir, 
                             window_doors.append(corners)
                             window_doors_types.append(pred_room_label_per_scene[j])
 
-            if not semantic_rich:
-                quant_result_dict_scene = evaluator.evaluate_scene(room_polys=room_polys)
-            else:
-                quant_result_dict_scene = evaluator.evaluate_scene(
-                    room_polys=room_polys,
-                    room_types=room_types,
-                    window_door_lines=window_doors,
-                    window_door_lines_types=window_doors_types)
-
-            if quant_result_dict is None:
-                quant_result_dict = quant_result_dict_scene
-            else:
-                for k in quant_result_dict.keys():
-                    quant_result_dict[k] += quant_result_dict_scene[k]
+            # if not semantic_rich:
+            #     quant_result_dict_scene = evaluator.evaluate_scene(room_polys=room_polys)
+            # else:
+            #     quant_result_dict_scene = evaluator.evaluate_scene(
+            #         room_polys=room_polys,
+            #         room_types=room_types,
+            #         window_door_lines=window_doors,
+            #         window_door_lines_types=window_doors_types)
+            #
+            # if quant_result_dict is None:
+            #     quant_result_dict = quant_result_dict_scene
+            # else:
+            #     for k in quant_result_dict.keys():
+            #         quant_result_dict[k] += quant_result_dict_scene[k]
 
             scene_counter += 1
 
@@ -490,8 +490,8 @@ def evaluate_floor_custom(model, dataset_name, data_loader, device, output_dir, 
 
                     pred_sem_rich_path = os.path.join(output_dir, '{}_sem_rich_pred.png'.format(scene_ids[i]))
                     plot_semantic_rich_floorplan(pred_sem_rich, pred_sem_rich_path,
-                                                 prec=quant_result_dict_scene['room_prec'],
-                                                 rec=quant_result_dict_scene['room_rec'])
+                                                 prec=None,
+                                                 rec=None)
                 else:
                     # plot regular room floorplan
                     room_polys = [np.array(r) for r in room_polys]
